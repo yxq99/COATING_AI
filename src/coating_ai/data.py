@@ -7,8 +7,21 @@ from .config import BOUNDS, DTYPE, FEATURES, TARGETS, feasible
 
 
 def initial_points(n=20, seed=42):
-    """Sobol候选经约束筛选；筛选后不再声称保留原始序列全部均匀性。"""
-    engine = torch.quasirandom.SobolEngine(5, scramble=True, seed=seed)
+    """Sobol 序列本身具有优秀的空间填充性和低差异性。但经过 feasible(x) 约束筛选后，被剔除的点破坏了原始序列的结构，剩余的点不再保证完整的均匀性。"""
+    # Argument：5：搜索空间的维度，对应输入变量；
+    # Argument：scramble=True：启用 Owen 加扰。加扰后能显著改善高维均匀性；
+    # Argument：seed 随机种子。仅在 scramble=True 时生效，用于控制加扰过程的确定性，保证实验可复现。
+    # orch.quasirandom.SobolEngine 这种写法是 Python 的模块层级访问语法。其中的 torch.quasirandom. 表示一个嵌套的模块路径。
+    engine = torch.quasirandom.SobolEngine(5, scramble=True, seed=seed) #初始化 Sobol 引擎，产生engine（对象）
+    # 属性（Attribute）和 方法（Method）// 根本区别在于：属性是“数据”，方法是“行为”。
+    ## 属性：访问数据，不加括号
+    # print(engine.dimension)   # 5        → 记录维度是多少
+    # print(engine.scramble)    # True     → 记录是否启用了 scramble
+    # print(engine.num_generated) # 0      → 记录已生成了多少个点
+    # 方法：执行动作，必须加括号
+    # points = engine.draw(10)  # 生成10个拟随机点 → 执行"采样"这个动作
+    # engine.reset()            # 重置内部计数器   → 执行"重置"这个动作
+
     blocks = []
     for _ in range(100):
         x = BOUNDS[0] + engine.draw(max(64, n), dtype=DTYPE) * (BOUNDS[1] - BOUNDS[0])
