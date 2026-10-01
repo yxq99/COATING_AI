@@ -5,7 +5,6 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/outputs" />
-      <excludeFolder url="file://$MODULE_DIR$/src/coating_ai.egg-info" />
     </content>
     <orderEntry type="jdk" jdkName="/opt/anaconda3/envs/AI" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
