@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coating-ai"
+version = "0.1.0"
+description = "防腐涂层主动学习与多目标贝叶斯优化教学项目"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "botorch==0.18.1",
+    "pandas>=2.2,<3",
+    "matplotlib>=3.8,<4",
+    "openpyxl>=3.1,<4",
+]
+
+[project.scripts]
+coating-ai = "coating_ai.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
