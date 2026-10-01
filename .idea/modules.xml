@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/COATING_AI.iml" filepath="$PROJECT_DIR$/.idea/COATING_AI.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/coating-ai.iml" filepath="$PROJECT_DIR$/.idea/coating-ai.iml" />
     </modules>
   </component>
 </project>
