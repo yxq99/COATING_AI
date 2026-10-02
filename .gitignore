@@ -27,6 +27,9 @@ env/
 .env.local
 *.log
 
+# Personal debugging scratchpad
+src/Test.py
+
 # Generated model/demo outputs
 outputs/
 
