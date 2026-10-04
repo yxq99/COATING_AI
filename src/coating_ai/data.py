@@ -1,5 +1,6 @@
 """通用输入设计、候选池、CSV读写和数据质量检查。"""
 from pathlib import Path
+import hashlib
 
 import pandas as pd
 import torch
@@ -85,15 +86,30 @@ def load_data(
     *,
     allow_demo: bool = False,
     min_rows: int = 6,
+    check_search_space: bool = True,
 ) -> tuple[pd.DataFrame, torch.Tensor, torch.Tensor]:
     """验证动态列、来源、有限数值、整数类型和当前可行性后返回训练张量。"""
     table = pd.read_csv(path)
-    required = ["sample_id", "data_kind", *config.input_names, *config.target_names]
+    table.columns = table.columns.str.strip()
+    if table.columns.duplicated().any():
+        raise ValueError("CSV列名清理空格后存在重复。")
+    required = [*config.input_names, *config.target_names]
     missing = set(required) - set(table.columns)
     if missing:
         raise ValueError(f"缺少列：{sorted(missing)}")
     if len(table) < min_rows:
         raise ValueError(f"至少需要{min_rows}组完整数据。")
+    # 允许直接读取用户的原始变量表；在内存中补齐追踪信息，不修改源文件。
+    if "sample_id" not in table:
+        numeric = table[required].astype(float)
+        ids = ["import_" + hashlib.sha256(
+            ",".join(float(value).hex() for value in row).encode("utf-8")
+        ).hexdigest()[:20] for row in numeric.to_numpy()]
+        table.insert(0, "sample_id", ids)
+    if "data_kind" not in table:
+        if allow_demo:
+            raise ValueError("模拟数据必须显式声明data_kind=demo。")
+        table.insert(1, "data_kind", "real")
     if table["sample_id"].isna().any() or table["sample_id"].duplicated().any():
         raise ValueError("sample_id必须非空且不能重复。")
     allowed = {"demo"} if allow_demo else {"real"}
@@ -103,8 +119,14 @@ def load_data(
     y = torch.tensor(table[config.target_names].to_numpy(dtype=float), dtype=DTYPE)
     if not torch.isfinite(x).all() or not torch.isfinite(y).all():
         raise ValueError("存在空白、无穷值或无效数字；请填完所有启用目标变量后再训练。")
-    bounds = resolve_search_bounds(config, x)
-    invalid = ~feasible(config, x, bounds)
+    if check_search_space:
+        bounds = resolve_search_bounds(config, x)
+        invalid = ~feasible(config, x, bounds)
+    else:
+        # 缩小下一批搜索范围不应使历史训练样本无法加载。
+        invalid = torch.zeros(len(x), dtype=torch.bool)
+        for index in config.integer_indices:
+            invalid |= ~torch.isclose(x[:, index], x[:, index].round(), atol=1e-6, rtol=0)
     if invalid.any():
         rows = table.loc[invalid.cpu().numpy(), "sample_id"].tolist()
         raise ValueError(f"以下样本违反输入类型、边界或已启用约束：{rows}")

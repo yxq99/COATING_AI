@@ -23,6 +23,8 @@ def _add_settings_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def _save_pareto_report(config, table, y, folder: Path) -> dict:
+    if config.recommendation.mode != "pareto":
+        return {}
     mask, hypervolume, reference = pareto_summary(config, y)
     save_csv(table.loc[mask.cpu().numpy()].copy(), folder / "observed_pareto.csv")
     return {
@@ -70,7 +72,7 @@ def _command_train(args, config) -> None:
         metrics = cross_validate(config, x, y, model_bounds)
         print(metrics.to_string(index=False))
     print("正在使用全部数据拟合最终模型……", flush=True)
-    model = fit(x, y, model_bounds)
+    model = fit(x, y, model_bounds, config)
     save_training_run(config, folder, table, model, model_bounds, metrics)
     metadata = _save_pareto_report(config, table, y, folder)
     write_json(metadata, folder / "pareto_metadata.json")
@@ -132,7 +134,7 @@ def _command_demo(args, config) -> None:
         _, hypervolume, _ = pareto_summary(config, y)
         history.append({"round": round_number, "rows": len(x), "hypervolume": hypervolume})
         print(f"轮次{round_number}：数据量={len(x)}，观测HV={hypervolume:.4f}", flush=True)
-        final_model = fit(x, y, bounds)
+        final_model = fit(x, y, bounds, config)
         if round_number == args.rounds:
             break
         new_x, report, _ = recommend_candidates(config, final_model, x, y, bounds)

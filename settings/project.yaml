@@ -1,7 +1,7 @@
 # 这是整个项目唯一需要经常修改的设置文件。
 project:
-  name: coating_ai_example
-  initial_design_size: 20
+  name: GND_Axis
+  initial_design_size: 6
 
 # 输入变量是实验中可以控制或选择的条件。
 # type只支持continuous（连续）和integer（整数）。enabled=false可临时停用变量。

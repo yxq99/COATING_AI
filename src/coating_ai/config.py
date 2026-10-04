@@ -31,6 +31,7 @@ class InputVariable:
     kind: str
     enabled: bool
     bounds: BoundsSpec
+    period: float | None = None
 
 
 @dataclass(frozen=True)
@@ -176,8 +177,11 @@ def load_project_config(path: str | Path = DEFAULT_SETTINGS_PATH) -> ProjectConf
                 raise ValueError(f"输入变量{name}启用边界时需要lower < upper。")
             if kind == "integer" and (not lower.is_integer() or not upper.is_integer()):
                 raise ValueError(f"整数变量{name}的显式上下界必须是整数。")
+        period = _number(item.get("period"), f"输入变量{name}.period", optional=True)
+        if period is not None and period <= 0:
+            raise ValueError(f"输入变量{name}.period必须大于0。")
         inputs.append(InputVariable(str(name), kind, bool(item.get("enabled", True)),
-                                    BoundsSpec(bounds_enabled, lower, upper, margin)))
+                                    BoundsSpec(bounds_enabled, lower, upper, margin), period))
 
     targets_raw = _mapping(root.get("target_variables"), "target_variables")
     targets: list[TargetVariable] = []
@@ -248,10 +252,7 @@ def load_project_config(path: str | Path = DEFAULT_SETTINGS_PATH) -> ProjectConf
         raise ValueError("risk_aversion和diversity_min_distance不能为负。")
     if recommendation.auto_reference_margin <= 0:
         raise ValueError("auto_reference_margin必须大于0。")
-    if mode == "target" and not any(
-        item.goal.enabled and item.goal.mode != "ignore" for item in targets if item.enabled
-    ):
-        raise ValueError("target模式至少需要启用一个非ignore目标条件。")
+    # 训练时不需要先指定想要达到的目标；仅在执行推荐时检查goal。
 
     initial_size = int(project.get("initial_design_size", 20))
     if initial_size < 1:
@@ -285,12 +286,10 @@ def resolve_search_bounds(config: ProjectConfig, observed_x: torch.Tensor | None
             maximum = float(observed_x[:, column].max())
             span = maximum - minimum
             base = span if span > 0 else max(abs(minimum), 1.0)
-            delta = max(spec.observed_margin * base, 1e-9)
+            delta = spec.observed_margin * base
             lower, upper = minimum - delta, maximum + delta
             if variable.kind == "integer":
                 lower, upper = math.floor(lower), math.ceil(upper)
-                if lower == upper:
-                    upper += 1
         lowers.append(float(lower))
         uppers.append(float(upper))
     return torch.tensor([lowers, uppers], dtype=DTYPE)
@@ -341,8 +340,11 @@ def resolve_reference_point(config: ProjectConfig, y: torch.Tensor) -> torch.Ten
 
 def schema_signature(config: ProjectConfig) -> dict[str, Any]:
     """模型存档使用的变量结构；推荐时防止拿错项目或列顺序。"""
-    return {
+    signature = {
         "input_names": config.input_names,
         "input_types": [item.kind for item in config.active_inputs],
         "target_names": config.target_names,
     }
+    if any(item.period is not None for item in config.active_inputs):
+        signature["input_periods"] = [item.period for item in config.active_inputs]
+    return signature

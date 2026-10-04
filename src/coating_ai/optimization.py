@@ -185,6 +185,8 @@ def recommend_target(
     search_bounds: torch.Tensor,
 ) -> tuple[torch.Tensor, pd.DataFrame, dict]:
     """根据target/range/阈值等设置，反向推荐最符合目标的输入变量。"""
+    if not any(t.goal.enabled and t.goal.mode != "ignore" for t in config.active_targets):
+        raise ValueError("请先在设置文件中启用至少一个goal，并填写你希望达到的目标值。")
     pool = candidate_pool(
         config, search_bounds, config.recommendation.candidate_pool_size,
         config.recommendation.seed,
@@ -201,6 +203,29 @@ def recommend_target(
     report["target_match_score"] = scores[indices].cpu().numpy()
     for name, values in components.items():
         report[name] = values[indices].cpu().numpy()
+    checks = []
+    for column, target in enumerate(config.active_targets):
+        goal = target.goal
+        if not goal.enabled or goal.mode == "ignore":
+            continue
+        values = mean[indices, column]
+        if goal.mode == "target" and goal.tolerance is not None:
+            matched = (values - goal.value).abs() <= goal.tolerance
+        elif goal.mode == "range":
+            matched = (values >= goal.lower) & (values <= goal.upper)
+        elif goal.mode == "at_least":
+            matched = values >= goal.value
+        elif goal.mode == "at_most":
+            matched = values <= goal.value
+        else:
+            continue  # 最大/最小化或没有容差的点目标，没有“达标”的二元定义。
+        report[f"{target.name}_predicted_condition_met"] = matched.cpu().numpy()
+        checks.append(matched)
+    if checks:
+        report["all_evaluable_conditions_met"] = torch.stack(checks).all(0).cpu().numpy()
+    outside = ((candidates < train_x.min(0).values - 1e-8)
+               | (candidates > train_x.max(0).values + 1e-8)).any(-1)
+    report["outside_observed_input_range"] = outside.cpu().numpy()
     report["recommendation_mode"] = "target"
     return candidates, report, {"score_definition": "lower_is_better"}
 

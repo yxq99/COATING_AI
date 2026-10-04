@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import replace
 
 import torch
 import yaml
@@ -10,7 +11,7 @@ import yaml
 from coating_ai.artifacts import load_training_run, save_training_run
 from coating_ai.config import feasible, load_project_config, resolve_search_bounds
 from coating_ai.data import frame, initial_points, load_data, simulate
-from coating_ai.learning import build_model
+from coating_ai.learning import AngularInputTransform, build_model, predict
 from coating_ai.optimization import pareto_summary, recommend_target
 
 
@@ -85,6 +86,61 @@ class WorkflowTests(unittest.TestCase):
         path = self.temp_path / f"settings_{len(list(self.temp_path.glob('settings_*')))}.yaml"
         path.write_text(yaml.safe_dump(settings(**kwargs), sort_keys=False), encoding="utf-8")
         return load_project_config(path)
+
+    def test_raw_variable_csv_import_and_stable_ids(self):
+        config = self.config()
+        x = initial_points(config)
+        y = simulate(config, x, resolve_search_bounds(config), noise=0)
+        raw = frame(config, x, y).drop(columns=["sample_id", "data_kind"])
+        path = self.temp_path / "raw.csv"
+        raw.to_csv(path, index=False)
+        first, _, _ = load_data(config, path)
+        second, _, _ = load_data(config, path)
+        self.assertEqual(first.sample_id.tolist(), second.sample_id.tolist())
+        self.assertEqual(set(first.data_kind), {"real"})
+        self.assertNotIn("sample_id", path.read_text())
+
+    def test_periodic_model_predictions_and_checkpoint_round_trip(self):
+        config = self.config()
+        config = replace(config, input_variables=(
+            replace(config.active_inputs[0], period=360.0), config.active_inputs[1]))
+        x = initial_points(config)
+        bounds = resolve_search_bounds(config)
+        y = simulate(config, x, bounds, noise=0)
+        model = build_model(x, y, bounds, config)
+        model.eval()
+        probe = torch.tensor([[0.0, 2.0], [360.0, 2.0]], dtype=torch.double)
+        before, _ = predict(model, probe)
+        self.assertTrue(torch.allclose(before[0], before[1], atol=1e-8))
+        run = self.temp_path / "periodic_run"
+        run.mkdir()
+        save_training_run(config, run, frame(config, x, y), model, bounds)
+        loaded, *_ = load_training_run(config, run)
+        after, _ = predict(loaded, probe)
+        self.assertTrue(torch.allclose(before, after, atol=1e-7))
+        transformed = AngularInputTransform(bounds, [360.0, None])(probe)
+        self.assertTrue(torch.allclose(transformed[0], transformed[1], atol=1e-8))
+
+    def test_training_allows_unset_goals_but_recommendation_requires_them(self):
+        raw = settings()
+        for target in raw["target_variables"].values():
+            target["goal"] = {"enabled": False, "mode": "target", "value": None}
+        path = self.temp_path / "unset.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        config = load_project_config(path)
+        x = initial_points(config)
+        bounds = resolve_search_bounds(config)
+        y = simulate(config, x, bounds, noise=0)
+        with self.assertRaisesRegex(ValueError, "请先"):
+            recommend_target(config, PredictableModel(), x, y, bounds)
+
+    def test_observed_integer_bounds_do_not_expand_when_margin_is_zero(self):
+        config = self.config()
+        integer = config.active_inputs[1]
+        integer = replace(integer, bounds=replace(integer.bounds, enabled=False))
+        config = replace(config, input_variables=(config.active_inputs[0], integer))
+        bounds = resolve_search_bounds(config, torch.tensor([[1., 2.], [3., 4.]]))
+        self.assertEqual(bounds[:, 1].tolist(), [2., 4.])
 
     def test_dynamic_schema_integer_inputs_and_constraints(self):
         config = self.config()
@@ -170,6 +226,16 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(torch.allclose(loaded_x, x))
         self.assertTrue(torch.allclose(loaded_y, y))
         self.assertTrue(torch.equal(loaded_bounds, bounds))
+
+        first = config.active_inputs[0]
+        narrowed = replace(config, input_variables=(
+            replace(first, bounds=replace(first.bounds, lower=4.0, upper=5.0)),
+            config.active_inputs[1],
+        ))
+        # 新搜索范围可以排除历史点，但模型必须仍能恢复原训练数据。
+        _, _, historical_x, _, historical_bounds = load_training_run(narrowed, run)
+        self.assertTrue(torch.allclose(historical_x, x))
+        self.assertTrue(torch.equal(historical_bounds, bounds))
 
         raw = settings()
         raw["input_variables"]["temperature_renamed"] = raw["input_variables"].pop("temperature")

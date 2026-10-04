@@ -88,9 +88,10 @@ def load_training_run(
         config,
         snapshot_path,
         allow_demo=kinds == {"demo"},
+        check_search_space=False,
     )
     model_bounds = checkpoint["model_bounds"].to(dtype=train_x.dtype)
-    model = build_model(train_x, train_y, model_bounds)
+    model = build_model(train_x, train_y, model_bounds, config)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     return model, table, train_x, train_y, model_bounds
