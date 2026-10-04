@@ -130,7 +130,7 @@ y: [样本数, 目标变量数]
 每次修改后运行：
 
 ```bash
-python -m unittest discover -s tests -v
+pytest -q
 python -m coating_ai demo --rounds 1
 ```
 

@@ -2,14 +2,6 @@
 
 这是一个由设置文件驱动的实验 AI 项目。它用高斯过程学习“输入变量 → 目标变量”的关系，并提供两种下一批实验推荐模式：
 
-当前项目使用高斯过程和Extra Trees等机器学习模型，尚未使用深度神经网络。
-
-常用入口：
-
-- [项目文件索引与管理规则](docs/PROJECT_FILES.md)：哪些文件需要修改、哪些是数据、哪些是历史记录。
-- [FCC/Bunge球面四簇工作流](docs/gnds/WORKFLOW.md)：当前GNDs任务的训练和固定Euler反向推荐。
-- [通用代码学习指南](docs/LEARNING_GUIDE.md)：阅读通用模型各模块。
-
 - `target`：给定期望目标值、区间或阈值，反向推荐最合适的输入变量。
 - `pareto`：在多个互相竞争的目标之间寻找 Pareto 前沿。
 
@@ -31,14 +23,14 @@ conda activate AI
 cd /Users/william/Documents/ProjectPython/COATING_AI
 python -m pip install -e .
 python -m pip check
-python -m unittest discover -s tests -v
+pytest -q
 ```
 
 然后在 PyCharm 的 **Settings → Project → Python Interpreter** 中选择 Conda 环境 `AI` 的 Python。可编辑安装后，修改 `src/coating_ai/` 无需重复安装。
 
 ## 2. 先修改设置文件
 
-通用任务设置在 [`settings/project.yaml`](settings/project.yaml)；GNDs任务使用 [`settings/gnds.yaml`](settings/gnds.yaml)。两套设置独立：
+所有项目级设置都集中在 [`settings/project.yaml`](settings/project.yaml)：
 
 - 输入变量：名称、`continuous`/`integer` 类型、开关、上下界。
 - 目标变量：名称、开关、Pareto 最大化/最小化方向、指定目标条件。
@@ -151,32 +143,19 @@ python -m coating_ai demo --rounds 1
 
 ```text
 COATING_AI/
-├── settings/
-│   ├── project.yaml               # 通用实验任务设置
-│   └── gnds.yaml                  # FCC/Bunge四簇设置与固定Euler搜索
+├── settings/project.yaml          # 用户主要修改的变量、目标、边界、约束和模式
 ├── src/coating_ai/
 │   ├── config.py                  # 读取和验证设置，解析动态边界与约束
 │   ├── data.py                    # 初始设计、候选池、数据质检、模拟函数
 │   ├── learning.py                # 高斯过程训练、预测和交叉验证
 │   ├── optimization.py            # Pareto优化与指定目标反向推荐
 │   ├── artifacts.py               # 保存和恢复训练模型及快照
-│   ├── gnds.py                    # GNDs物理几何、模型比较、搜索与CSV填写
 │   └── __main__.py                # 将各模块连接为命令行工作流
 ├── scripts/generate_doe_excel.py  # 可选的Excel初始实验表
-├── tests/
-│   ├── test_workflow.py           # 通用流程测试
-│   └── test_gnds.py               # 几何、四簇配对与原数据保护测试
-├── data/
-│   ├── initial_design.csv         # 可公开的空白示例模板
-│   ├── gnds/training/             # GNDs训练数据版本；本地保存
-│   ├── gnds/targets/              # 期望目标请求表；本地保存
-│   └── archive/                   # 旧数据版本；本地保存
+├── tests/test_workflow.py         # 自动测试
+├── data/initial_design.csv        # 可公开的空白示例模板
 ├── outputs/                       # 本地运行结果；Git忽略
-└── docs/
-    ├── PROJECT_FILES.md           # 当前项目完整文件索引
-    ├── LEARNING_GUIDE.md          # 通用代码学习路线
-    ├── gnds/WORKFLOW.md           # 当前GNDs专用操作指南
-    └── archive/                  # 历史基线说明
+└── docs/LEARNING_GUIDE.md         # 代码学习路线
 ```
 
 真实实验数据、模型文件、输出结果、PyCharm本地设置和调试脚本 `src/Test.py` 都不会提交到 Git。Git 只管理可复现项目所需的源代码、设置示例、文档、测试和空白模板。
