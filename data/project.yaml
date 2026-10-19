@@ -1,0 +1,43 @@
+project:
+  name: coating_durability_design
+  task: design
+  initial_design_size: 12
+input_variables:
+  hybrid_wt_pct:
+    type: continuous
+    enabled: true
+    bounds:
+      enabled: true
+      lower: 0.1
+      upper: 1.5
+      observed_margin: 0.1
+  ldh_mxene_ratio:
+    type: continuous
+    enabled: true
+    bounds:
+      enabled: true
+      lower: 0.1
+      upper: 2.0
+      observed_margin: 0.1
+target_variables:
+  logZ_28d:
+    enabled: true
+    pareto_direction: maximize
+    reference_value: 6.0
+    goal:
+      enabled: true
+      mode: at_least
+      value: 10.0
+      tolerance: 0.3
+      weight: 1.0
+constraints:
+  enabled: false
+  rules: []
+recommendation:
+  mode: target
+  batch_size: 3
+  candidate_pool_size: 512
+  seed: 42
+  risk_aversion: 0.25
+  diversity_min_distance: 0.05
+  auto_reference_margin: 0.1
