@@ -12,7 +12,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # 当前文件绝对路径向上回溯两级。
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
-DEFAULT_SETTINGS_PATH = PROJECT_ROOT / "settings" / "project.yaml"
+DEFAULT_SETTINGS_PATH = DATA_DIR / "project.yaml"
 DTYPE = torch.double
 RESERVED_COLUMNS = {"sample_id", "data_kind"}
 
@@ -83,6 +83,7 @@ class ProjectConfig:
     constraints: tuple[LinearConstraint, ...]
     recommendation: RecommendationSpec
     source_path: Path
+    task: str = "design"
 
     @property
     def input_names(self) -> list[str]:
@@ -256,6 +257,9 @@ def load_project_config(path: str | Path = DEFAULT_SETTINGS_PATH) -> ProjectConf
     initial_size = int(project.get("initial_design_size", 20))
     if initial_size < 1:
         raise ValueError("project.initial_design_size必须大于0。")
+    task = str(project.get("task", "design"))
+    if task not in {"design", "prediction"}:
+        raise ValueError("project.task只支持design或prediction。")
     return ProjectConfig(
         name=str(project.get("name", source.stem)),
         initial_design_size=initial_size,
@@ -265,6 +269,7 @@ def load_project_config(path: str | Path = DEFAULT_SETTINGS_PATH) -> ProjectConf
         constraints=tuple(constraints),
         recommendation=recommendation,
         source_path=source,
+        task=task,
     )
 
 

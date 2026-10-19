@@ -107,12 +107,13 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "没有观测范围"):
             initial_points(config)
 
-    def test_real_data_must_be_complete_and_not_mixed_with_demo(self):
+    def test_unified_data_must_be_complete_without_kind(self):
         config = self.config()
         x = initial_points(config)
         bounds = resolve_search_bounds(config)
         y = simulate(config, x, bounds, noise=0)
         table = frame(config, x, y)
+        self.assertNotIn("data_kind", table.columns)
         path = self.temp_path / "real.csv"
         table.to_csv(path, index=False)
         _, loaded_x, loaded_y = load_data(config, path)
@@ -127,8 +128,8 @@ class WorkflowTests(unittest.TestCase):
         table = frame(config, x, y)
         table.loc[0, "data_kind"] = "demo"
         table.to_csv(path, index=False)
-        with self.assertRaisesRegex(ValueError, "不可混合"):
-            load_data(config, path)
+        # 旧文件的来源列只作元数据，不再决定能否训练或推荐。
+        self.assertEqual(len(load_data(config, path)[0]), len(table))
 
     def test_pareto_supports_mixed_directions(self):
         config = self.config(mode="pareto")
@@ -181,6 +182,15 @@ class WorkflowTests(unittest.TestCase):
         other = load_project_config(other_path)
         with self.assertRaisesRegex(ValueError, "变量名称、类型或顺序"):
             load_training_run(other, run)
+
+    def test_single_target_gp_has_no_extra_output_batch_dimension(self):
+        config = self.config()
+        x = initial_points(config)
+        bounds = resolve_search_bounds(config)
+        y = simulate(config, x, bounds, noise=0)[:, :1]
+        model = build_model(x, y, bounds)
+        self.assertEqual(model(x).batch_shape, torch.Size())
+        self.assertEqual(model.posterior(x).mean.shape, (len(x), 1))
 
 
 if __name__ == "__main__":

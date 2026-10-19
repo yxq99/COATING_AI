@@ -7,14 +7,15 @@ from botorch.models.transforms import Normalize, Standardize
 from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
-from .config import ProjectConfig
+from .config import ProjectConfig, resolve_search_bounds
 
 
 def build_model(x: torch.Tensor, y: torch.Tensor, model_bounds: torch.Tensor) -> SingleTaskGP:
     """按当前输入维度和目标数量，为各目标创建相互独立的批量GP。"""
     input_count = x.shape[1]
     target_count = y.shape[1]
-    batch_shape = torch.Size([target_count])
+    # SingleTaskGP的单目标没有输出批次轴；强行使用[1]会使拟合维度不一致。
+    batch_shape = torch.Size([target_count]) if target_count > 1 else torch.Size()
     kernel = ScaleKernel(
         MaternKernel(nu=2.5, ard_num_dims=input_count, batch_shape=batch_shape),
         batch_shape=batch_shape,
@@ -50,14 +51,25 @@ def cross_validate(
     x: torch.Tensor,
     y: torch.Tensor,
     model_bounds: torch.Tensor,
+    groups=None,
 ) -> pd.DataFrame:
-    """逐样本留一验证；每一折重新拟合标准化和模型，避免目标信息泄漏。"""
+    """留组验证；同源轨迹同折，观测范围及标准化仅从训练折拟合。"""
     predictions = torch.empty_like(y)
-    for index in range(len(x)):
-        print(f"留一验证 {index + 1}/{len(x)}", flush=True)
-        mask = torch.arange(len(x)) != index
-        model = fit(x[mask], y[mask], model_bounds)
-        predictions[index] = predict(model, x[index:index + 1])[0][0]
+    labels = list(range(len(x))) if groups is None else list(groups)
+    if len(labels) != len(x) or pd.isna(labels).any():
+        raise ValueError("validation_group必须完整且与样本数量一致。")
+    unique = list(dict.fromkeys(labels))
+    if len(unique) < 2:
+        raise ValueError("至少需要两个独立验证组。")
+    for number, label in enumerate(unique, 1):
+        print(f"留组验证 {number}/{len(unique)}", flush=True)
+        held = torch.tensor([item == label for item in labels])
+        mask = ~held
+        if int(mask.sum()) < 2:
+            raise ValueError("每一折至少需要两条训练记录。")
+        fold_bounds = resolve_search_bounds(config, x[mask])
+        model = fit(x[mask], y[mask], fold_bounds)
+        predictions[held] = predict(model, x[held])[0]
     error = predictions - y
     total = ((y - y.mean(0)) ** 2).sum(0)
     r2 = torch.where(total > 0, 1 - error.square().sum(0) / total, torch.nan)
@@ -66,4 +78,5 @@ def cross_validate(
         "MAE": error.abs().mean(0).cpu().numpy(),
         "RMSE": error.square().mean(0).sqrt().cpu().numpy(),
         "R2": r2.cpu().numpy(),
+        "validation_folds": len(unique),
     })

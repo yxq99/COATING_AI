@@ -80,15 +80,7 @@ def load_training_run(
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
     if checkpoint.get("schema") != schema_signature(config):
         raise ValueError("当前设置中的变量名称、类型或顺序与该训练模型不一致，请重新训练。")
-    raw = pd.read_csv(snapshot_path)
-    kinds = set(raw.get("data_kind", []))
-    if kinds not in ({"real"}, {"demo"}):
-        raise ValueError("训练快照中的data_kind必须全部为real或全部为demo。")
-    table, train_x, train_y = load_data(
-        config,
-        snapshot_path,
-        allow_demo=kinds == {"demo"},
-    )
+    table, train_x, train_y = load_data(config, snapshot_path)
     model_bounds = checkpoint["model_bounds"].to(dtype=train_x.dtype)
     model = build_model(train_x, train_y, model_bounds)
     model.load_state_dict(checkpoint["model_state_dict"])

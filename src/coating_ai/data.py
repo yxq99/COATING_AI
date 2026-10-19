@@ -58,14 +58,12 @@ def frame(
     x: torch.Tensor,
     y: torch.Tensor | None = None,
     start: int = 1,
-    kind: str = "real",
 ) -> pd.DataFrame:
-    """把Tensor转换为带变量名称、样本编号和数据来源的实验表。"""
+    """生成统一实验表，不再要求real/demo或data_kind分类。"""
     table = pd.DataFrame(x.detach().cpu().numpy(), columns=config.input_names)
     for index in config.integer_indices:
         table[config.input_names[index]] = table[config.input_names[index]].round().astype(int)
-    table.insert(0, "sample_id", [f"{kind}_{i:04d}" for i in range(start, start + len(x))])
-    table.insert(1, "data_kind", kind)
+    table.insert(0, "sample_id", [f"sample_{i:04d}" for i in range(start, start + len(x))])
     for column, name in enumerate(config.target_names):
         table[name] = float("nan") if y is None else y[:, column].detach().cpu().numpy()
     return table
@@ -83,12 +81,11 @@ def load_data(
     config: ProjectConfig,
     path: str | Path,
     *,
-    allow_demo: bool = False,
     min_rows: int = 6,
 ) -> tuple[pd.DataFrame, torch.Tensor, torch.Tensor]:
-    """验证动态列、来源、有限数值、整数类型和当前可行性后返回训练张量。"""
+    """统一读取数据，仍校验完整性、编号、数值与物理输入可行性。"""
     table = pd.read_csv(path)
-    required = ["sample_id", "data_kind", *config.input_names, *config.target_names]
+    required = ["sample_id", *config.input_names, *config.target_names]
     missing = set(required) - set(table.columns)
     if missing:
         raise ValueError(f"缺少列：{sorted(missing)}")
@@ -96,9 +93,6 @@ def load_data(
         raise ValueError(f"至少需要{min_rows}组完整数据。")
     if table["sample_id"].isna().any() or table["sample_id"].duplicated().any():
         raise ValueError("sample_id必须非空且不能重复。")
-    allowed = {"demo"} if allow_demo else {"real"}
-    if set(table["data_kind"]) != allowed:
-        raise ValueError(f"本次只接受data_kind={allowed}；不可混合模拟与真实数据。")
     x = torch.tensor(table[config.input_names].to_numpy(dtype=float), dtype=DTYPE)
     y = torch.tensor(table[config.target_names].to_numpy(dtype=float), dtype=DTYPE)
     if not torch.isfinite(x).all() or not torch.isfinite(y).all():

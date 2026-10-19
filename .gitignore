@@ -33,10 +33,12 @@ src/Test.py
 # Generated model/demo outputs
 outputs/
 
-# Keep only the public experiment template in Git.
-# Real measurements and generated spreadsheets remain local.
+# Measurements, source instruments and filled workbooks stay local.
+# Only instructions and effective configuration are public project files.
 data/*
-!data/initial_design.csv
+!data/README.md
+!data/project.yaml
+!data/early_model.yaml
 
 # Notebook checkpoints
 .ipynb_checkpoints/

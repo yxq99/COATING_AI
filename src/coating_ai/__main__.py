@@ -1,4 +1,4 @@
-"""项目命令行入口：建表、验证、训练、推荐、合并和模拟演示。"""
+"""统一命令行：EIS整理、建表、验证、训练、预测、推荐和合并。"""
 from __future__ import annotations
 
 import argparse
@@ -10,15 +10,15 @@ import torch
 
 from .artifacts import create_run, load_training_run, save_training_run, write_json
 from .config import DATA_DIR, DEFAULT_SETTINGS_PATH, load_project_config, resolve_search_bounds
-from .data import frame, initial_points, load_data, save_csv, simulate
-from .learning import cross_validate, fit
+from .data import frame, initial_points, load_data, save_csv
+from .learning import cross_validate, fit, predict
 from .optimization import pareto_summary, recommend_candidates
 
 
 def _add_settings_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--settings", default=str(DEFAULT_SETTINGS_PATH),
-        help="项目YAML设置文件（默认：settings/project.yaml）",
+        help="项目YAML设置文件（默认：data/project.yaml）",
     )
 
 
@@ -33,7 +33,7 @@ def _save_pareto_report(config, table, y, folder: Path) -> dict:
 
 
 def _candidate_measurement_table(config, candidates, folder: Path) -> pd.DataFrame:
-    table = frame(config, candidates, kind="real")
+    table = frame(config, candidates)
     table["sample_id"] = [f"{folder.name}_{index + 1:02d}" for index in range(len(table))]
     return table
 
@@ -53,7 +53,7 @@ def _command_validate(args, config) -> None:
     folder = create_run("validate")
     save_csv(table, folder / "training_snapshot.csv")
     shutil.copy2(config.source_path, folder / "settings_snapshot.yaml")
-    metrics = cross_validate(config, x, y, model_bounds)
+    metrics = cross_validate(config, x, y, model_bounds, table.get("validation_group"))
     save_csv(metrics, folder / "cv_metrics.csv")
     metadata = _save_pareto_report(config, table, y, folder)
     write_json(metadata, folder / "validation_metadata.json")
@@ -67,7 +67,7 @@ def _command_train(args, config) -> None:
     folder = create_run("train")
     metrics = None
     if not args.skip_cv:
-        metrics = cross_validate(config, x, y, model_bounds)
+        metrics = cross_validate(config, x, y, model_bounds, table.get("validation_group"))
         print(metrics.to_string(index=False))
     print("正在使用全部数据拟合最终模型……", flush=True)
     model = fit(x, y, model_bounds)
@@ -78,9 +78,9 @@ def _command_train(args, config) -> None:
 
 
 def _command_recommend(args, config) -> None:
+    if config.task == "prediction":
+        raise ValueError("早期EIS模型只用于predict；观测特征不能当作可控制配方搜索。")
     model, training_table, train_x, train_y, _ = load_training_run(config, args.run)
-    if set(training_table["data_kind"]) != {"real"}:
-        raise ValueError("recommend命令只接受真实实验训练模型；模拟模型只能用于demo流程。")
     search_bounds = resolve_search_bounds(config, train_x)
     candidates, prediction_report, metadata = recommend_candidates(
         config, model, train_x, train_y, search_bounds
@@ -95,6 +95,10 @@ def _command_recommend(args, config) -> None:
     metadata["recommendation_mode"] = config.recommendation.mode
     metadata["source_training_run"] = str(Path(args.run).expanduser().resolve())
     write_json(metadata, folder / "recommendation_metadata.json")
+    if args.out_data:
+        from .eis_workflow import write_measurement_templates
+        write_measurement_templates(measurement_table, Path(args.out_data))
+        print(f"待填实验数据：{Path(args.out_data).resolve()}")
     print(prediction_report.to_string(index=False))
     print(f"推荐结果：{folder.resolve()}")
 
@@ -113,46 +117,48 @@ def _command_merge(args, config) -> None:
     except Exception:
         combined_path.unlink(missing_ok=True)
         raise
-    print(f"已合并{len(old)}+{len(new)}={len(combined)}组真实数据：{combined_path.resolve()}")
+    print(f"已合并{len(old)}+{len(new)}={len(combined)}组完整数据：{combined_path.resolve()}")
 
 
-def _command_demo(args, config) -> None:
-    print("这是数学模拟闭环，所有目标值都不代表真实材料规律。", flush=True)
-    torch.manual_seed(config.recommendation.seed)
-    bounds = resolve_search_bounds(config)
-    x = initial_points(config)
-    y = simulate(config, x, bounds)
-    folder = create_run(f"demo_{config.recommendation.mode}")
-    history: list[dict] = []
-    final_model = None
-
-    for round_number in range(args.rounds + 1):
-        table = frame(config, x, y, kind="demo")
-        save_csv(table, folder / f"round_{round_number:02d}.csv")
-        _, hypervolume, _ = pareto_summary(config, y)
-        history.append({"round": round_number, "rows": len(x), "hypervolume": hypervolume})
-        print(f"轮次{round_number}：数据量={len(x)}，观测HV={hypervolume:.4f}", flush=True)
-        final_model = fit(x, y, bounds)
-        if round_number == args.rounds:
-            break
-        new_x, report, _ = recommend_candidates(config, final_model, x, y, bounds)
-        save_csv(report, folder / f"round_{round_number + 1:02d}_recommendations.csv")
-        new_y = simulate(config, new_x, bounds)
-        x = torch.cat([x, new_x])
-        y = torch.cat([y, new_y])
-
-    save_csv(pd.DataFrame(history), folder / "history.csv")
-    save_training_run(config, folder, table, final_model, bounds)
-    metadata = _save_pareto_report(config, table, y, folder)
-    metadata["recommendation_mode"] = config.recommendation.mode
-    metadata["simulation_only"] = True
-    write_json(metadata, folder / "demo_metadata.json")
-    print(f"模拟结果：{folder.resolve()}")
+def _command_predict(args, config) -> None:
+    model, _, train_x, _, _ = load_training_run(config, args.run)
+    table = pd.read_csv(args.data)
+    needed = ["sample_id", *config.input_names]
+    if set(needed) - set(table):
+        raise ValueError(f"预测表缺少列：{sorted(set(needed)-set(table))}")
+    if table.empty:
+        raise ValueError("没有可预测行。请先填写新配方及1/3/7天EIS，再运行prepare-eis。")
+    if table.sample_id.isna().any() or table.sample_id.duplicated().any():
+        raise ValueError("预测sample_id不能为空或重复。")
+    x = torch.tensor(table[config.input_names].to_numpy(dtype=float), dtype=torch.double)
+    if not torch.isfinite(x).all():
+        raise ValueError("预测输入包含空白或无效数字。")
+    from .config import feasible
+    bounds = resolve_search_bounds(config, train_x)
+    for column, item in enumerate(config.active_inputs):
+        if not item.bounds.enabled:
+            bounds[:, column] = torch.tensor([-torch.inf, torch.inf])
+    if not feasible(config, x, bounds).all():
+        raise ValueError("预测输入违反显式边界、整数或线性约束。")
+    mean, std = predict(model, x)
+    report = table[needed].copy()
+    for column, name in enumerate(config.target_names):
+        report[f"{name}_predicted"] = mean[:, column].numpy()
+        report[f"{name}_latent_std"] = std[:, column].numpy()
+    output = Path(args.out) if args.out else create_run("predict") / "predictions.csv"
+    save_csv(report, output)
+    print(report.to_string(index=False))
+    print(f"预测结果：{output.resolve()}；标准差不等于制备波动或可靠达标概率。")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="通用实验AI：验证、训练和反向推荐")
     commands = parser.add_subparsers(dest="command", required=True)
+
+    prepare = commands.add_parser("prepare-eis", help="从主工作簿整理时间特征、目标和重复统计")
+    prepare.add_argument("--workbook", default=str(DATA_DIR / "ML_data.xlsx"))
+    prepare.add_argument("--data-dir", default=str(DATA_DIR))
+    prepare.add_argument("--new-data", help="recommend --out-data生成、填写后的新实验目录")
 
     init = commands.add_parser("init", help="按设置生成待填写的初始实验表")
     _add_settings_argument(init)
@@ -162,26 +168,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = commands.add_parser("validate", help="执行数据检查和留一交叉验证")
     _add_settings_argument(validate)
-    validate.add_argument("--data", required=True, help="已填写目标变量的真实实验CSV")
+    validate.add_argument("--data", required=True, help="已填写目标变量的统一CSV")
 
     train = commands.add_parser("train", help="验证并保存可供推荐使用的最终模型")
     _add_settings_argument(train)
-    train.add_argument("--data", required=True, help="已填写目标变量的真实实验CSV")
+    train.add_argument("--data", required=True, help="已填写目标变量的统一CSV")
     train.add_argument("--skip-cv", action="store_true", help="跳过留一验证（仅用于快速调试）")
 
     recommend = commands.add_parser("recommend", help="按设置中的target或pareto模式推荐输入")
     _add_settings_argument(recommend)
     recommend.add_argument("--run", required=True, help="train命令生成的训练目录")
+    recommend.add_argument("--out-data", help="额外在指定data子目录生成待填配方和EIS模板")
+
+    prediction = commands.add_parser("predict", help="用已有模型预测新样本，不需要后期标签")
+    _add_settings_argument(prediction)
+    prediction.add_argument("--run", required=True)
+    prediction.add_argument("--data", required=True)
+    prediction.add_argument("--out", help="不覆盖已有文件的预测CSV路径")
 
     merge = commands.add_parser("merge", help="检查并合并旧数据和新完成的实验")
     _add_settings_argument(merge)
-    merge.add_argument("--data", required=True, help="原真实实验CSV")
-    merge.add_argument("--new", required=True, help="新完成的真实实验CSV")
+    merge.add_argument("--data", required=True, help="原完整数据CSV")
+    merge.add_argument("--new", required=True, help="新完成的完整数据CSV")
     merge.add_argument("--out", required=True, help="新的合并CSV；不会覆盖旧文件")
 
-    demo = commands.add_parser("demo", help="用模拟函数演示完整闭环")
-    _add_settings_argument(demo)
-    demo.add_argument("--rounds", type=int, default=1, help="推荐并模拟测量的轮数")
     return parser
 
 
@@ -190,9 +200,12 @@ def main() -> None:
     args = parser.parse_args()
     if getattr(args, "n", None) is not None and args.n < 1:
         parser.error("n必须大于0。")
-    if getattr(args, "rounds", 0) < 0 or getattr(args, "rounds", 0) > 20:
-        parser.error("rounds必须在0到20之间。")
     torch.set_num_threads(2)
+    if args.command == "prepare-eis":
+        from .eis_workflow import prepare_data
+        result = prepare_data(Path(args.workbook), Path(args.data_dir), args.new_data)
+        print(result)
+        return
     config = load_project_config(args.settings)
     handlers = {
         "init": _command_init,
@@ -200,7 +213,7 @@ def main() -> None:
         "train": _command_train,
         "recommend": _command_recommend,
         "merge": _command_merge,
-        "demo": _command_demo,
+        "predict": _command_predict,
     }
     handlers[args.command](args, config)
 
