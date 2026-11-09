@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cache/
 .coverage
 .coverage.*
 htmlcov/
@@ -21,24 +22,51 @@ env/
 .idea/
 .vscode/
 .DS_Store
+Thumbs.db
+._*
+~$*
 
 # Local secrets and logs
 .env
-.env.local
+.env.*
 *.log
+*.pem
+*.key
 
 # Personal debugging scratchpad
 src/Test.py
 
-# Generated model/demo outputs
+# Generated models and predictions
+output/
 outputs/
+/local/
+
+# Guard against accidentally committing custom exports outside data/ and output/.
+*.[cC][sS][vV]
+*.[tT][sS][vV]
+*.[xX][lL][sS]
+*.[xX][lL][sS][xXmMbB]
+*.[pP][aA][rR]
+*.[dD][aA][tT]
+*.parquet
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.joblib
 
 # Measurements, source instruments and filled workbooks stay local.
-# Only instructions and effective configuration are public project files.
+# Only effective configuration is tracked under data/.
 data/*
-!data/README.md
 !data/project.yaml
 !data/early_model.yaml
+
+# Local reference copies; the maintained guide is COATING_ML_GUIDE.md.
+/document/CODE_EXPLAINED.md
+/document/COATING_ML_PAPER_PLAN.md
+/document/ML_THEORY.md
 
 # Notebook checkpoints
 .ipynb_checkpoints/

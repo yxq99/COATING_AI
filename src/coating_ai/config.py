@@ -11,7 +11,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # 当前文件绝对路径向上回溯两级。
 DATA_DIR = PROJECT_ROOT / "data"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
+OUTPUT_DIR = PROJECT_ROOT / "output"
 DEFAULT_SETTINGS_PATH = DATA_DIR / "project.yaml"
 DTYPE = torch.double
 RESERVED_COLUMNS = {"sample_id", "data_kind"}

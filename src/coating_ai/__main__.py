@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 
 from .artifacts import create_run, load_training_run, save_training_run, write_json
-from .config import DATA_DIR, DEFAULT_SETTINGS_PATH, load_project_config, resolve_search_bounds
+from .config import DATA_DIR, DEFAULT_SETTINGS_PATH, OUTPUT_DIR, load_project_config, resolve_search_bounds
 from .data import frame, initial_points, load_data, save_csv
 from .learning import cross_validate, fit, predict
 from .optimization import pareto_summary, recommend_candidates
@@ -20,6 +20,10 @@ def _add_settings_argument(parser: argparse.ArgumentParser) -> None:
         "--settings", default=str(DEFAULT_SETTINGS_PATH),
         help="项目YAML设置文件（默认：data/project.yaml）",
     )
+
+
+def _add_output_name_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--name", help="output下的新结果目录名；拒绝覆盖已有目录")
 
 
 def _save_pareto_report(config, table, y, folder: Path) -> dict:
@@ -40,7 +44,7 @@ def _candidate_measurement_table(config, candidates, folder: Path) -> pd.DataFra
 
 def _command_init(args, config) -> None:
     count = args.n or config.initial_design_size
-    output = Path(args.out) if args.out else DATA_DIR / "initial_design.csv"
+    output = Path(args.out) if args.out else OUTPUT_DIR / "initial_design.csv"
     points = initial_points(config, count, args.seed)
     save_csv(frame(config, points), output)
     print(f"已生成{count}组初始实验：{output.resolve()}")
@@ -50,7 +54,7 @@ def _command_init(args, config) -> None:
 def _command_validate(args, config) -> None:
     table, x, y = load_data(config, args.data)
     model_bounds = resolve_search_bounds(config, x)
-    folder = create_run("validate")
+    folder = create_run(args.name or f"validate_{'early' if config.task == 'prediction' else 'design'}")
     save_csv(table, folder / "training_snapshot.csv")
     shutil.copy2(config.source_path, folder / "settings_snapshot.yaml")
     metrics = cross_validate(config, x, y, model_bounds, table.get("validation_group"))
@@ -64,7 +68,7 @@ def _command_validate(args, config) -> None:
 def _command_train(args, config) -> None:
     table, x, y = load_data(config, args.data)
     model_bounds = resolve_search_bounds(config, x)
-    folder = create_run("train")
+    folder = create_run(args.name or ("early" if config.task == "prediction" else "design"))
     metrics = None
     if not args.skip_cv:
         metrics = cross_validate(config, x, y, model_bounds, table.get("validation_group"))
@@ -80,12 +84,14 @@ def _command_train(args, config) -> None:
 def _command_recommend(args, config) -> None:
     if config.task == "prediction":
         raise ValueError("早期EIS模型只用于predict；观测特征不能当作可控制配方搜索。")
+    if args.out_data and Path(args.out_data).exists():
+        raise FileExistsError(f"实验轮次目录已存在：{args.out_data}。请用新的 --out-data 路径。")
     model, training_table, train_x, train_y, _ = load_training_run(config, args.run)
     search_bounds = resolve_search_bounds(config, train_x)
     candidates, prediction_report, metadata = recommend_candidates(
         config, model, train_x, train_y, search_bounds
     )
-    folder = create_run(f"recommend_{config.recommendation.mode}")
+    folder = create_run(args.name or f"recommend_{config.recommendation.mode}")
     measurement_table = _candidate_measurement_table(config, candidates, folder)
     prediction_report.insert(0, "sample_id", measurement_table["sample_id"])
     save_csv(measurement_table, folder / "candidates_to_measure.csv")
@@ -145,7 +151,9 @@ def _command_predict(args, config) -> None:
     for column, name in enumerate(config.target_names):
         report[f"{name}_predicted"] = mean[:, column].numpy()
         report[f"{name}_latent_std"] = std[:, column].numpy()
-    output = Path(args.out) if args.out else create_run("predict") / "predictions.csv"
+    output = Path(args.out) if args.out else create_run(
+        args.name or f"predict_{'early' if config.task == 'prediction' else 'design'}"
+    ) / "predictions.csv"
     save_csv(report, output)
     print(report.to_string(index=False))
     print(f"预测结果：{output.resolve()}；标准差不等于制备波动或可靠达标概率。")
@@ -166,22 +174,26 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--n", type=int, help="覆盖设置中的初始实验数量")
     init.add_argument("--seed", type=int, help="覆盖设置中的随机种子")
 
-    validate = commands.add_parser("validate", help="执行数据检查和留一交叉验证")
+    validate = commands.add_parser("validate", help="执行数据检查和留组交叉验证")
     _add_settings_argument(validate)
+    _add_output_name_argument(validate)
     validate.add_argument("--data", required=True, help="已填写目标变量的统一CSV")
 
     train = commands.add_parser("train", help="验证并保存可供推荐使用的最终模型")
     _add_settings_argument(train)
+    _add_output_name_argument(train)
     train.add_argument("--data", required=True, help="已填写目标变量的统一CSV")
-    train.add_argument("--skip-cv", action="store_true", help="跳过留一验证（仅用于快速调试）")
+    train.add_argument("--skip-cv", action="store_true", help="跳过交叉验证（仅用于快速调试）")
 
     recommend = commands.add_parser("recommend", help="按设置中的target或pareto模式推荐输入")
     _add_settings_argument(recommend)
+    _add_output_name_argument(recommend)
     recommend.add_argument("--run", required=True, help="train命令生成的训练目录")
     recommend.add_argument("--out-data", help="额外在指定data子目录生成待填配方和EIS模板")
 
     prediction = commands.add_parser("predict", help="用已有模型预测新样本，不需要后期标签")
     _add_settings_argument(prediction)
+    _add_output_name_argument(prediction)
     prediction.add_argument("--run", required=True)
     prediction.add_argument("--data", required=True)
     prediction.add_argument("--out", help="不覆盖已有文件的预测CSV路径")
@@ -200,6 +212,8 @@ def main() -> None:
     args = parser.parse_args()
     if getattr(args, "n", None) is not None and args.n < 1:
         parser.error("n必须大于0。")
+    if args.command == "predict" and args.out and args.name:
+        parser.error("predict只能选择 --name 或 --out 之一。")
     torch.set_num_threads(2)
     if args.command == "prepare-eis":
         from .eis_workflow import prepare_data

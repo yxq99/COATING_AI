@@ -3,15 +3,28 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 import yaml
 
-from coating_ai.artifacts import load_training_run, save_training_run
+from coating_ai.artifacts import create_run, load_training_run, save_training_run
 from coating_ai.config import feasible, load_project_config, resolve_search_bounds
 from coating_ai.data import frame, initial_points, load_data, simulate
 from coating_ai.learning import build_model
 from coating_ai.optimization import pareto_summary, recommend_target
+
+
+class OutputDirectoryTest(unittest.TestCase):
+    def test_named_output_preserves_existing_results(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "output"
+            with patch("coating_ai.artifacts.OUTPUT_DIR", root):
+                self.assertEqual(create_run("design_round02"), root / "design_round02")
+                with self.assertRaises(FileExistsError):
+                    create_run("design_round02")
+                with self.assertRaises(ValueError):
+                    create_run("../outside")
 
 
 def settings(*, mode="target", observed_bounds=False, pool_size=128):

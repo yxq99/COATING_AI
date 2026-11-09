@@ -1,9 +1,9 @@
 """保存训练运行，并在之后的推荐步骤中安全地恢复模型。"""
 from __future__ import annotations
 
-from datetime import datetime
 import json
 from pathlib import Path
+import re
 import shutil
 from typing import Any
 
@@ -16,9 +16,14 @@ from .learning import build_model
 
 
 def create_run(label: str) -> Path:
-    """创建不会覆盖旧结果的时间戳目录。"""
-    path = OUTPUT_DIR / f"{label}_{datetime.now():%Y%m%d_%H%M%S_%f}"
-    path.mkdir(parents=True, exist_ok=False)
+    """在固定输出目录下创建一个明确命名、不会覆盖旧结果的子目录。"""
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", label):
+        raise ValueError("结果名称必须为1–64个字母、数字、下划线或连字符，且以字母或数字开头。")
+    path = OUTPUT_DIR / label
+    try:
+        path.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as error:
+        raise FileExistsError(f"结果目录已存在：{path}。请用 --name 选择新名称，不覆盖已有结果。") from error
     return path
 
 

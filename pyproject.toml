@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "coating-ai"
 version = "0.2.0"
 description = "设置驱动的实验机器学习、Pareto优化与指定目标反向推荐项目"
-readme = "README.md"
+readme = "document/COATING_ML_GUIDE.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "botorch==0.18.1",

@@ -7,7 +7,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from coating_ai.config import DATA_DIR, DEFAULT_SETTINGS_PATH, load_project_config
+from coating_ai.config import DEFAULT_SETTINGS_PATH, OUTPUT_DIR, load_project_config
 from coating_ai.data import frame, initial_points
 
 
@@ -26,7 +26,7 @@ def main() -> None:
     count = args.n or config.initial_design_size
     if count < 1:
         raise ValueError("n必须大于0。")
-    output = Path(args.output) if args.output else DATA_DIR / "initial_design.xlsx"
+    output = Path(args.output) if args.output else OUTPUT_DIR / "initial_design.xlsx"
     if output.exists():
         raise FileExistsError(f"为防止覆盖已有记录，输出文件已经存在：{output}")
     output.parent.mkdir(parents=True, exist_ok=True)
